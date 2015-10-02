@@ -1,0 +1,441 @@
+--- kaltura.admin.inc
++++ kaltura.admin.inc
+@@ -900,7 +900,8 @@
+  * KalturaEntryFilter changed to KalturaMediaEntryFilter
+  * this may need some reworking
+  */
+-function kaltura_import_entries_page() {
++function kaltura_import_entries_page($listtype = "video") {
++
+   // initialise variables
+   $foundFlag = true;      // set to false if there are no entries
+   $entries = array();     // mix entries
+@@ -913,9 +914,9 @@
+   $current_page = 1;
+   $pager = '';
+ 
+-  if (!empty($_POST['op']) && $_POST['op'] == 'import selected') {
+-    kaltura_import_entries($_POST['entries_to_import']);
+-    drupal_goto('admin/config/media/kaltura/import');
++  if (!empty($_POST['op']) && $_POST['form_id'] == 'kaltura_create_entries_form') {
++    kaltura_import_entries($_POST['entries_to_import'], true, $_POST['listtype']);
++    drupal_goto('admin/config/media/kaltura/import/'.$_POST['listtype']);
+   }
+   if (variable_get('kaltura_partner_id', '') == '') {
+     return t('You have not configured your partner details yet. Import cannot be performed until you setup your partner details');
+@@ -929,15 +930,17 @@
+   }
+ 
+   while (!$finished) {
++
+     set_time_limit(30);
+     // get the media entries
+-      list($mediaTotal, $mediaEntries) = kaltura_get_my_entries($each_page, $current_page);
+-      if ($mediaTotal == 0) {
+-        $foundFlag=false;
+-      }
+-      else {
+-        $enabledFlag = true;
+-      }
++    list($mediaTotal, $mediaEntries) = kaltura_get_my_entries($each_page, $current_page, $listtype);
++
++    if ($mediaTotal == 0) {
++      $foundFlag=false;
++    }
++    else {
++      $enabledFlag = true;
++    }
+     $entries_need_import = array_merge($entries_need_import, $entries, $mediaEntries);
+ 
+     //list($total, $each_page, $entries) = kaltura_get_my_entries($each_page = 30, $_GET['p']);
+@@ -946,7 +949,8 @@
+      *  return t('No entries found.');
+      *}
+      */
+-    $entries_need_import = kaltura_remove_existing_entries($entries_need_import);
++    $entries_need_import = kaltura_remove_existing_entries($entries_need_import, $listtype);
++    $mediaTotal = count($entries_need_import);
+ 
+     if (count($entries_need_import) >= $each_page)
+     {
+@@ -983,29 +987,74 @@
+     }
+   }
+ */
++
++
++  $header = array();
++  $rows = array();
++
++
++  switch ($listtype) {
++    case "playlist":
++        $header = array(
++              'id' => t('ID'),
++              'media_count' => t('Videos'),
++              'name' => t('Name'),
++              'description' => t('Description')
++            );
++      break;
++
++    default:
++      $header = array(
++              'id' => t('ID'),
++              'type' => t('Type'),
++              'name' => t('Name'),
++              'pixels' => t('Width / height'),
++              'duration' => t('Duration'),
++            );
++      break;
++  }
++
+   if (($total+$mediaTotal) > $each_page) {
+     $pages = ceil(($total+$mediaTotal)/$each_page);
++
++    // get the path, so we send the page to the right list
++    $request_path = request_path();
++    $request_path = isset($request_path) ? $request_path : 'admin/config/media/kaltura/import';
++
+     for ($start = 1;$start <= $pages;$start++) {
+       if ($start == $_GET['p']) {
+         $pager .= '<a>'. $start .'</a>';
+       }
+       else {
+-        $pager .= l($start, 'admin/config/media/kaltura/import', array('query' => array('p' => $start)));
++        $pager .= l($start, $request_path , array('query' => array('p' => $start)));
+       }
+       $pager .= '&nbsp;';
+     }
+   }
++
+   if (is_array($entries_need_import) && count($entries_need_import)) {
+-    $ksetings = new KalturaSettings;
+-    foreach ($entries_need_import as $entry => $details) {
+-      $entries_options[$details['id']] = $details['name'] .': ' . '(' . $ksetings->media_types_map[$details['type']] . ') - ' . $details['id'];
++    $ksettings = new KalturaSettings();
++    foreach($entries_need_import as $entry => $details) {
++       $rows[$details['id']]['id'] = $details['id'];
++
++       switch ($listtype) {
++         case "playlist":
++           $rows[$details['id']]['name'] = $details['name'];
++           $rows[$details['id']]['description'] = $details['description'];
++           $rows[$details['id']]['media_count'] = $details['media_count'];
++           break;
++         default:
++           $rows[$details['id']]['type'] = $ksettings->media_types_map[$details['type']];
++           $rows[$details['id']]['name'] = $details['name'];
++           $rows[$details['id']]['pixels'] = $details['pixels'];
++           $rows[$details['id']]['duration'] = $details['duration'];
++           break;
++       }
+     }
+   }
+-  else {
+-    $entries_options = array();
+-  }
+-  $output = drupal_get_form('kaltura_create_entries_form', array($entries_options));
+-  $output = drupal_render($output);
++
++  $output = drupal_get_form('kaltura_create_entries_form', $header, $rows, $listtype);
++  $output .= drupal_render($output);
+   return $pager . $output . $pager;
+ }
+ 
+@@ -1013,12 +1062,67 @@
+  * helper function that uses kaltura_get_entries() to retreive a list of specific entries
+  * belongs to the partner, and call kaltura_import_entry() for each of the retreived list
+  */
+-function kaltura_import_entries($entries) {
++function kaltura_import_entries($entries, $isAdmin = FALSE, $listtype = "video") {
++
+   $entries_list = implode(',', $entries);
+-  $my_entries = kaltura_get_entries($entries, count($entries), true);
+ 
++  $media_playlist_bind = array();
++
++  // get the media IDs from the playlist
++  if ($listtype == "playlist") {
++    $kaltura_client = KalturaHelpers::getKalturaClient($isAdmin);
++    $session_user = KalturaHelpers::getSessionUser();
++
++    $filter = new KalturaPlaylistFilter();
++    $filter->idIn = $entries_list;
++
++    $playlist = $kaltura_client->playlist->listAction($filter);
++
++    $media_from_playlist = array();
++    if (!empty($playlist)) {
++      if (!empty($playlist->objects) && is_array($playlist->objects)) {
++        foreach($playlist->objects as $playlist_entry) {
++          if (is_object($playlist_entry) && isset($playlist_entry->playlistContent)) {
++
++            // first clear out the old playlist entries, if any
++            kaltura_remove_drupal_playlist_entries($playlist_entry->id);
++
++             // add the playlist to Drupal
++            $playlist_id = kaltura_import_playlist($playlist_entry);
++
++            $playlist_entries = explode(",", $playlist_entry->playlistContent);
++            foreach($playlist_entries as $this_entry) {
++              $media_from_playlist[] = $this_entry;
++
++              // fill this array to know which media is bound to which playlist
++              $media_playlist_bind[$playlist_entry->id][] = $this_entry;
++            }
++          }
++        }
++      }
++    }
++
++    if (!empty($media_from_playlist)) {
++      $entries = $media_from_playlist;
++    }
++  }
++
++  $entries_list = implode(',', $entries);
++  $my_entries = kaltura_get_entries($entries, true);
++
++  $inserted_entry_ids = array();
+   foreach ($my_entries[0]->objects as $entry) {
+-    kaltura_import_entry($entry);
++    $inserted_entry_ids[] = kaltura_import_entry($entry);
++  }
++
++  foreach($inserted_entry_ids as $entry_id) {
++    // locate in which playlist this resides
++    foreach($media_playlist_bind as $playlist_id => $arr_medias) {
++
++      if (in_array($entry_id, $arr_medias)) {
++        kaltura_playlist_entry_bind($playlist_id, $entry_id);
++      }
++    }
+   }
+ }
+ 
+@@ -1030,11 +1134,27 @@
+  // global $user;
+   $entry = kaltura_kmc_obj_to_drupal_array($entry_details);
+   $entry['kaltura_created_date'] = REQUEST_TIME; //we have no way when the entry was created on the KMC so the create date is when we received the notifcation
+-  db_insert('node_kaltura')
++
++  if (!kaltura_get_kaltura_node_exists($entry['kaltura_entryid'])) {
++    db_insert('node_kaltura')
++                      ->fields($entry)
++                      ->execute();
++ }
++
++  return $entry['kaltura_entryid'];
++}
++
++function kaltura_import_playlist($playlist_details) {
++  $entry = kaltura_playlist_obj_to_drupal_array($playlist_details);
++
++  if (!kaltura_get_kaltura_playlist_exists($entry['kaltura_playlist_id'])) {
++    db_insert('kaltura_playlist')
+       ->fields($entry)
+       ->execute();
+-}
++  }
+ 
++  return $entry['kaltura_playlist_id'];
++}
+ 
+ 
+ /**
+@@ -1068,31 +1188,85 @@
+   return $ent;
+ }
+ 
++function kaltura_playlist_obj_to_drupal_array($obj) {
++  $ent = array();
++  $ent['kaltura_playlist_id'] = $obj->id;
++  $ent['name'] = $obj->name;
++  $ent['description'] = $obj->description;
++  $ent['imported_at'] = REQUEST_TIME;
++  return $ent;
++}
++
++function kaltura_playlist_entry_bind($playlist_id, $node_kaltura_id) {
++  $ent = array();
++  $ent['playlist_id'] = $playlist_id;
++  $ent['node_kaltura_entry_id'] = $node_kaltura_id;
++
++   db_insert('kaltura_playlist_entry')
++      ->fields($ent)
++      ->execute();
++}
++
++/**
++ * Check if this video is already imported into the Drupal site
++ *
++ * @param type $kaltura_entryid
++ * @return integer
++ */
++function kaltura_get_kaltura_node_exists($kaltura_entryid) {
++
++   $select = db_select('node_kaltura', 'k')
++        ->fields('k', array('kaltura_entryid'))
++        ->condition('kaltura_entryid', $kaltura_entryid, '=')
++        ->countQuery()
++        ->execute()
++        ->fetchField();
++   return $select;
++}
++
++function kaltura_get_kaltura_playlist_exists($kaltura_playlist_id) {
++
++   $select = db_select('kaltura_playlist', 'kpl')
++        ->fields('kpl', array('kaltura_playlist_id'))
++        ->condition('kaltura_playlist_id', $kaltura_playlist_id, '=')
++        ->countQuery()
++        ->execute()
++        ->fetchField();
++   return $select;
++}
++
++
++
+ /*
+  * helper function to provide form fields containing all entries for import
+  * each entry as checkbox option
+  */
+-function kaltura_create_entries_form($form) {
++function kaltura_create_entries_form($form, $form_state, $header = array(), $rows = array(), $listtype = null) {
+   $args = func_get_args();
+-  $entries_options = $args[2][0];
++
+   $form['desc'] = array (
+     '#markup' => t('The list below includes media entries of your Kaltura account that are not synced to the Drupal server. Please select media entries to import to the Drupal server and submit. </br> Imported media would be available to use within the Drupal site.') . '</br></br>',
+   );
+-  $form['check_all'] = array (
+-    '#type' => 'checkbox',
+-    '#title' => t('check all'),
+-    '#attributes' => array('class' => array('checkall')),
++
++  $form['listtype'] = array
++  (
++    '#type' => 'hidden',
++    '#value' => $listtype,
+   );
+-  $form['entries_to_import'] = array(
+-    '#type' => 'checkboxes',
+-    '#title' => t('Choose the entries you want to import'),
+-    '#options' => $entries_options,
++
++  $form['entries_to_import'] = array
++  (
++    '#type' => 'tableselect',
++    '#header' => $header,
++    '#options' => $rows,
+   );
++
+   $form['import_now'] = array(
+     '#type' => 'submit',
+-    '#title' => t('import selected'),
+-    '#value' => t('import selected'),
++    '#title' => t('Import selected'),
++    '#value' => t('Import selected'),
+   );
++
+   return $form;
+ }
+ 
+@@ -1103,25 +1277,54 @@
+  * changes:
+  * now retrieving all media entries - needs to import mix entries as well
+  */
+-function kaltura_get_my_entries($page_size = 30, $page = 1) {
++function kaltura_get_my_entries($page_size = 30, $page = 1, $type = "video") {
++
+   $isAdmin = 1;
+   $session_user = KalturaHelpers::getSessionUser();
+   $kaltura_client = KalturaHelpers::getKalturaClient($isAdmin); // this is admin task and should be able to import all entries in the account
++
+   $pager_filter = new KalturaFilterPager();
+-  $kmf = new KalturaBaseEntryFilter();
+-  $kmf->typeEqual = KalturaEntryType::MEDIA_CLIP;
+   $pager_filter->pageIndex = $page;
+   $pager_filter->pageSize = $page_size;
+-  $result = $kaltura_client->baseEntry->listAction($kmf, $pager_filter);
++
++  switch ($type) {
++    case "playlist":
++      $kmf = new KalturaPlaylistFilter();
++      $result = $kaltura_client->playlist->listAction($kmf, $pager_filter);
++      break;
++
++    default:
++      $kmf = new KalturaBaseEntryFilter();
++      $kmf->typeEqual = KalturaEntryType::MEDIA_CLIP;
++      $result = $kaltura_client->baseEntry->listAction($kmf, $pager_filter);
++      break;
++  }
++
+   if ($result->totalCount > 0) {
++
+     $count = $result->totalCount;
+     if (is_array($result->objects) && count($result->objects)) {
+       foreach ($result->objects as $entry) {
+         $returned_entries[$entry->id] = array(
+-                'id' => $entry->id,
+-                'name' => $entry->name,
+-                'type' => $entry->mediaType,
+-        );
++                  'id' => $entry->id,
++                  'name' => $entry->name,
++          );
++
++        switch ($type) {
++          case "playlist":
++            $returned_entries[$entry->id]['description'] = $entry->description;
++
++            // calculate the number of media in the playlist
++            $playlist_container = explode(",", $entry->playlistContent);
++            $returned_entries[$entry->id]['media_count'] = count($playlist_container);
++
++            break;
++          default :
++            $returned_entries[$entry->id]['type'] = $entry->mediaType;
++            $returned_entries[$entry->id]['pixels'] = $entry->width." x ".$entry->height;
++            $returned_entries[$entry->id]['duration'] = format_interval($entry->duration, 4);
++            break;
++        }
+       }
+     }
+     return array($count, $returned_entries);
+@@ -1131,21 +1334,27 @@
+   }
+ }
+ 
++
+ /*
+  * helper function that recieves a list of entries, and returns a new list
+  * which does not contain entries that are already represented as nodes
+  */
+-function kaltura_remove_existing_entries($entries) {
++function kaltura_remove_existing_entries($entries, $listtype = "video") {
+   $count = 0;
+   $new_entries = array();
+   if (is_array($entries) && count($entries)) {
+     foreach ($entries as $entry) {
+-      $sel = db_select('node_kaltura', 'k')
+-        ->fields('k', array('kaltura_entryid'))
+-        ->condition('kaltura_entryid', $entry['id'], '=')
+-        ->countQuery()
+-        ->execute()
+-        ->fetchField();
++
++      switch($listtype) {
++        case "playlist":
++          $sel = kaltura_get_kaltura_playlist_exists($entry['id']);
++          break;
++
++        default:
++          $sel = kaltura_get_kaltura_node_exists($entry['id']);
++          break;
++      }
++
+       //$sel = 'SELECT COUNT(nid) n FROM {node_kaltura} WHERE kaltura_entryId = \'%s\'';
+       //$result = db_fetch_object(db_query($sel, $entry['id']));
+       if ($sel == 0) {

@@ -1,0 +1,8 @@
+name = "Features State"
+description = "Display a light version of features state table."
+package = "Features"
+core = 7.x
+files[] = includes/features_state.inc
+dependencies[] = features
+
+configure = admin/structure/features/features-state-settings

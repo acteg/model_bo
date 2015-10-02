@@ -1,0 +1,7 @@
+<?php
+/**
+ * @file
+ * Code for the act_viewslideshow feature.
+ */
+
+include_once 'act_viewslideshow.features.inc';

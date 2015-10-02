@@ -1,0 +1,13 @@
+name = Actency - Wysiwyg -  Ckeditor Filtered HTML
+description = CKEditor 4.4.5.25 Filtred HTML
+core = 7.x
+package = Actency
+version = 7.x-1.0
+project = act_wysiwyg_ckeditor_filtered_html
+dependencies[] = features
+dependencies[] = filter
+dependencies[] = wysiwyg
+features[features_api][] = api:2
+features[filter][] = filtered_html
+features[wysiwyg][] = filtered_html
+project path = sites/all/modules/features/actency/wysiwyg/

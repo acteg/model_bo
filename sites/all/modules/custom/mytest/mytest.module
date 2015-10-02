@@ -1,0 +1,60 @@
+<?php
+
+function mytest_init() {
+  $current_path = (current_path());
+  if (strstr($current_path, "node/add") !== NULL) {
+    $node_type = basename($current_path);
+    $strs = array();
+    $strs['input#edit-title'] = "Title / Name of the $node_type";
+    $strs['input#edit-field-year-und-0-value'] = "Year of Publication (Exemple: 2015)";
+    $strs['input#edit-field-length-und-0-value'] = "Track length (Exemple 2:25 for 2 Minutes and 25 Seconds)";
+    $strs['input#edit-field-writer-und-0-value'] = "Lyrics writer's name";
+
+    $strs['#edit-field-album-artwork-und-0-upload'] = "Photo / Artwork";
+    $strs['#edit-field-tracks-und-0-target-id'] = "Type the track name, Or Add a new track";
+    $strs['#edit-field-mp3-und-0-browse-button'] = "Select /Upload an audio track (Mp3 Format)";
+    $strs['#edit-field-albums-und-actions-ief-add'] = "Select an existing Album Or Create a new Album";
+
+    if ($node_type == "artist") {
+      $strs['.form-item-body-und-0-value'] = "About the Artist";
+    }
+
+    if ($node_type == "album") {
+      $strs['#field-plus-und-0-field-date-add-more-wrapper'] = "Release date of the album";
+      $strs['#edit-field-plus-und-0-field-style-und-0-value'] = "Music style (Classical, Pop , Rock ....)";
+    }
+
+    foreach ($strs as $cssSelect => $text) {
+      $options[] = array(
+        'cssSelect' => $cssSelect,
+        'trigger' => array('mouseover', 'mouseout'),
+        'text' => $text,
+      );
+    }
+  }
+  else {
+    $options['my'] = array(
+      'cssSelect' => '[title]',
+      //ajaxPath' => array("$(this).attr('href')", 'a'),
+      'trigger' => array('mouseover', 'mouseout'),
+        //'width' => 350,
+        //'text' => 'This is the text that will display in the beautytip bubble',
+    );
+  }
+
+
+  beautytips_add_beautytips($options);
+  // smart_ip_admin_settings_submit($form, $form_state);
+
+
+
+  $css = <<<CSS
+      
+    #bloc-row{width:100%;min-height:500px;} 
+    .class-50{width:49%;float:left;padding:0 5px; display:block;}  
+    .clear{clear:both;}
+CSS;
+  drupal_add_css($css, array('type' => 'inline'));
+
+  //boost_expire_cache($urls);
+}

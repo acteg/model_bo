@@ -1,0 +1,14 @@
+name = Actency - Wysiwyg -  General Config
+core = 7.x
+package = Actency
+version = 7.x-1.0
+project = act_wysiwyg_conf_general
+dependencies[] = features
+dependencies[] = filter
+dependencies[] = libraries
+dependencies[] = wysiwyg
+dependencies[] = act_wysiwyg_ckeditor_filtered_html
+dependencies[] = act_wysiwyg_ckeditor_full_html
+features[features_api][] = api:2
+features[filter][] = plain_text
+project path = sites/all/modules/features/actency/wysiwyg/

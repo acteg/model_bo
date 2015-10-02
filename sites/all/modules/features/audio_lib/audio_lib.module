@@ -1,0 +1,7 @@
+<?php
+/**
+ * @file
+ * Code for the Audio lib feature.
+ */
+
+include_once 'audio_lib.features.inc';

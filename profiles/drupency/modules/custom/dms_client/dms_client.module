@@ -1,0 +1,411 @@
+<?php
+/**
+ * Implements hook_menu().
+ */
+function dms_client_menu() {
+  // Report page
+  $items['admin/reports/dms'] = array(
+    'title' => 'DMS Report',
+    'page callback' => 'dms_client_report_callback',
+    'access callback' => TRUE
+  );
+
+  // Module settings
+  $items['admin/config/system/dms_client/settings'] = array(
+    'title' => 'DMS Client Settings',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('dms_client_settings_form'),
+    'file' => 'dms_client.inc',
+    'access callback' => TRUE
+  );
+  // Actions
+  $items['dms-action/cron-run'] = array(
+    'title' => 'CRON run from dms call',
+    'page callback' => 'dms_client_cron_run',
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK
+  );
+  $items['dms-action/cache-clear'] = array(
+    'title' => 'Cache clear from dms call',
+    'page callback' => 'dms_client_cache_clear',
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK
+  );
+  return $items;
+}
+
+/**
+ * Menu callback
+ */
+function dms_client_report_callback() {
+  $response = array(
+    'code' => -1
+  );
+  // Request analysis
+  $params = drupal_get_query_parameters();
+  $req_valid = dms_client_valid_request($params);
+  // Available modes (default: 'light')
+  $arr_modes = array('light', 'full', 'specific');
+  $req_mode = 'light';
+  if (array_key_exists('mode', $params) && in_array($params['mode'], $arr_modes)) {
+    $req_mode = $params['mode'];
+  }
+  if ($req_valid) {
+    $response['code'] = 1;
+    $response['system_status'] = dms_client_system_status($req_mode == 'light');
+    if ($req_mode == 'full' || in_array('updates', $params['checklist'])) {
+      $response['updates'] = dms_client_updates_status();
+    }
+    if ($req_mode == 'full' || in_array('features', $params['checklist'])) {
+      $response['features'] = dms_client_features_status();
+    }
+    if ($req_mode == 'full' || in_array('statistics', $params['checklist'])) {
+      $response['statistics'] = dms_client_statistics();
+    }
+    if ($req_mode == 'full' || in_array('hack', $params['checklist'])) {
+      $response['hack'] = dms_client_hack_check();
+    }
+    if ($req_mode == 'full' || in_array('logs', $params['checklist'])) {
+      $response['logs'] = dms_client_logs_check();
+    }
+  }
+
+  // Call every module that implement hook_dms_get_report() to populate the output.
+  // We do not use module_invoke_all() to be able to use variable by reference.
+  foreach (module_implements('dms_get_report') as $module) {
+    $function = $module . '_dms_get_report';
+    $function($response);
+  }
+
+  drupal_add_http_header('Content-Type', 'application/json');
+  drupal_add_http_header('Access-Control-Allow-Origin', "*");
+  drupal_add_http_header('Access-Control-Allow-Methods', 'GET,POST');
+  echo json_encode($response);
+}
+
+/**
+ * Menu callback
+ */
+function dms_client_cron_run() {
+  return array(
+    'code' => drupal_cron_run() ? 1 : -1
+  );
+}
+
+/**
+ * Menu callback
+ */
+function dms_client_cache_clear() {
+  return array(
+    'code' => drupal_flush_all_caches() ? 1 : -1
+  );
+}
+
+/**
+ * Menu callback
+ *
+ * @param $params
+ *   Query parameters
+ */
+function dms_client_valid_request($params) {
+  // If php >= 5.5 we can use password_verify()
+  return (array_key_exists('secret', $params) && dms_client_password_verify(variable_get('dms_client_secret', dms_client_generateRandomString()), $params['secret'])) ? TRUE : FALSE;
+}
+
+/**
+ * Verify a secret
+ *
+ * @param $pass
+ *   The clear secret
+ * @param $hash
+ *   The hash to match
+ */
+function dms_client_password_verify($pass, $hash) {
+  $expected = crypt($pass, $pass);
+  return $expected == $hash;
+}
+
+/**
+ * Generate a secret
+ *
+ * @param $length
+ *   The length of the generated secret
+ */
+function dms_client_generateRandomString($length = 255) {
+  $characters = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  $randomString = '';
+  for ($i = 0; $i < $length; $i++) {
+    $randomString .= $characters[rand(0, strlen($characters) - 1)];
+  }
+  return $randomString;
+}
+
+/**
+ * System status (see /modules/system/system.admin.inc)
+ *
+ * @param $check
+ *   If true, only returns a boolean whether there are system status errors.
+ */
+function dms_client_system_status($check = FALSE) {
+  // Load .install files
+  include_once DRUPAL_ROOT . '/includes/install.inc';
+  drupal_load_updates();
+
+  // Check run-time requirements and status information.
+  $requirements = module_invoke_all('requirements', 'runtime');
+  usort($requirements, '_system_sort_requirements');
+
+  if ($check) {
+    return drupal_requirements_severity($requirements) == REQUIREMENT_ERROR;
+  }
+  return $requirements;
+}
+
+/**
+ * Updates status (see /modules/update/update.manager.inc)
+ *
+ * @param $check
+ *   If true, only returns a boolean whether there are system status errors.
+ */
+function dms_client_updates_status($check = FALSE) {
+  module_load_include('module', 'update', 'update');
+  $available = update_get_available(TRUE);
+  if (empty($available)) {
+    return array('error' => t('There was a problem getting update information. Try again later.'));
+  }
+
+  // This will be a nested array. The first key is the kind of project, which
+  // can be either 'enabled', 'disabled', 'manual' (projects which require
+  // manual updates, such as core). Then, each subarray is an array of
+  // projects of that type, indexed by project short name, and containing an
+  // array of data for cells in that project's row in the appropriate table.
+  $projects = array();
+
+  module_load_include('inc', 'update', 'update.compare');
+  $project_data = update_calculate_project_data($available);
+
+  foreach ($project_data as $name => $project) {
+    // Filter out projects which are up to date already.
+    if ($project['status'] == UPDATE_CURRENT) {
+      continue;
+    }
+    // The project name to display can vary based on the info we have.
+    if (!empty($project['title'])) {
+      if (!empty($project['link'])) {
+        $project_name = l($project['title'], $project['link']);
+      }
+      else {
+        $project_name = check_plain($project['title']);
+      }
+    }
+    elseif (!empty($project['info']['name'])) {
+      $project_name = check_plain($project['info']['name']);
+    }
+    else {
+      $project_name = check_plain($name);
+    }
+    if ($project['project_type'] == 'theme' || $project['project_type'] == 'theme-disabled') {
+      $project_name .= ' ' . t('(Theme)');
+    }
+
+    if (empty($project['recommended'])) {
+      // If we don't know what to recommend they upgrade to, we should skip
+      // the project entirely.
+      continue;
+    }
+
+    $recommended_release = $project['releases'][$project['recommended']];
+    $recommended_version = $recommended_release['version'] . ' ' . l(t('(Release notes)'), $recommended_release['release_link'], array('attributes' => array('title' => t('Release notes for @project_title', array('@project_title' => $project['title'])))));
+    if ($recommended_release['version_major'] != $project['existing_major']) {
+      $recommended_version .= '<div title="Major upgrade warning" class="update-major-version-warning">' . t('This update is a major version update which means that it may not be backwards compatible with your currently running version.  It is recommended that you read the release notes and proceed at your own risk.') . '</div>';
+    }
+
+    // Create an entry for this project.
+    $entry = array(
+      'title' => $project_name,
+      'installed_version' => $project['existing_version'],
+      'recommended_version' => $recommended_version,
+    );
+
+    switch ($project['status']) {
+      case UPDATE_NOT_SECURE:
+      case UPDATE_REVOKED:
+        $entry['title'] .= ' ' . t('(Security update)');
+        $type = 'security';
+        break;
+
+      case UPDATE_NOT_SUPPORTED:
+        $type = 'unsupported';
+        $entry['title'] .= ' ' . t('(Unsupported)');
+        break;
+
+      case UPDATE_UNKNOWN:
+      case UPDATE_NOT_FETCHED:
+      case UPDATE_NOT_CHECKED:
+      case UPDATE_NOT_CURRENT:
+        $type = 'recommended';
+        break;
+
+      default:
+        // Jump out of the switch and onto the next project in foreach.
+        continue 2;
+    }
+    if ($name != 'drupal') {
+      $projects[$type][$name] = $entry;
+    }
+    else {
+      $entry['type'] = $type;
+      $projects[$name] = $entry;
+    }
+  }
+
+  if (empty($projects)) {
+    return array('uptodate' => t('All of your projects are up to date.'));
+  }
+  return $projects;
+}
+
+/**
+ * Features status (see /sites/all/modules/contrib/features/features.admin.inc)
+ */
+function dms_client_features_status() {
+  if (!module_exists('features')) {
+    return array('error' => t('The features module is not enabled.'));
+  }
+
+  module_load_include('inc', 'features', 'features.export');
+
+  // Sort the Features list before compiling the output.
+  $features = features_get_features();
+  ksort($features);
+
+  foreach ($features as $k => $m) {
+    $storage = $feature_key = NULL;
+    switch (features_get_storage($m->name)) {
+      case FEATURES_DEFAULT:
+        $feature_key = 'default';
+        $storage = '';
+        break;
+      case FEATURES_REBUILDABLE:
+        $feature_key = 'rebuildable';
+        $storage = '';
+        break;
+      case FEATURES_OVERRIDDEN:
+        $feature_key = 'overridden';
+        $storage = 'Overridden';
+        break;
+      case FEATURES_NEEDS_REVIEW:
+        $feature_key = 'need_review';
+        $storage = 'Need review';
+        break;
+    }
+    if ($m->status) {
+      $rows['enabled'][$feature_key][$m->name] = array(
+        'name' => $m->info['name'],
+        'version' => $m->info['version'],
+        'storage' => $storage
+      );
+    }
+    else {
+      $rows['disabled'][$m->name] = array(
+        'name' => $m->info['name'],
+        'version' => $m->info['version'],
+        'storage' => $storage
+      );
+    }
+  }
+
+  if (empty($rows)) {
+    return array('nofeatures' => t('No Features were found.'));
+  }
+  return $rows;
+}
+
+/**
+ * Statistics (users count, nodes count, lang, etc.)
+ */
+function dms_client_statistics() {
+  // Lang
+  $statistics['languages'] = language_list('enabled');
+  $statistics['language_default'] = language_default();
+  // Users count
+  $statistics['users'] = db_select('users', 'u')
+    ->countQuery()
+    ->execute()
+    ->fetchField();
+  // Nodes count
+  $statistics['nodes']['published'] = db_select('node', 'n')
+    ->condition('n.status', 1)
+    ->countQuery()
+    ->execute()
+    ->fetchField();
+  $statistics['nodes']['unpublished'] = db_select('node', 'n')
+    ->condition('n.status', 0)
+    ->countQuery()
+    ->execute()
+    ->fetchField();
+  return $statistics;
+}
+
+/**
+ * Hack status (based on MD5check module)
+ */
+function dms_client_hack_check() {
+  if (!module_exists('md5check')) {
+    return array('error' => t('The md5check module is not enabled.'));
+  }
+  $hack = array('code' => 1);
+  // Fetches an array of all active modules and looping through them
+  $modules = module_list(TRUE, FALSE);
+  foreach ($modules as $moduleName) {
+    $modulePath = drupal_get_path('module', $moduleName);
+
+    // Don't check customs
+    if (strpos($modulePath, 'modules/features') === FALSE && strpos($modulePath, 'modules/custom') === FALSE) {
+      // Loads the module data from database
+      $module = md5check_get_values_for_module($moduleName);
+      // Creates a md5 hash of the modules files
+      $md5 = md5check_calculate_md5_value_for_module($module);
+
+      // If the existing module md5 hash isn't null (as never runned before) we'll check if it has changed
+      // else we'll just store the new value
+      if ($module->md5check !== NULL) {
+        if ($md5 != $module->md5check) {
+          // The value has changed as in a files content has changed - we'll report this
+          $hack['modules'][] = $moduleName;
+        }
+      }
+      else {
+        // Existing value is null - new value will be stored
+        md5check_setMD5value($module->filename, $md5);
+      }
+    }
+  }
+  return $hack;
+}
+
+
+/**
+ * Logs status (daily counter by severity)
+ */
+function dms_client_logs_check() {
+  $logs = array();
+  $logs_status = array(
+    'danger'  => array(WATCHDOG_ALERT, WATCHDOG_CRITICAL, WATCHDOG_EMERGENCY),
+    'warning' => array(WATCHDOG_ERROR, WATCHDOG_WARNING),
+    'info'    => array(WATCHDOG_NOTICE, WATCHDOG_DEBUG, WATCHDOG_INFO)
+  );
+
+  $thisMorning = strtotime('today midnight');
+
+  foreach ($logs_status as $status => $severities) {
+    $query = db_select('watchdog', 'w')
+      ->condition('w.timestamp', $thisMorning, '>')
+      ->condition('w.severity', $severities, 'IN')
+      ->fields('w', array('wid'));
+
+    $logs[$status] = $query->countQuery()->execute()->fetchField();
+  }
+  
+  return $logs;
+}

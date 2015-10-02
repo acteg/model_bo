@@ -1,0 +1,5 @@
+name = mytest
+description = test
+core = 7.x
+version = 0.1
+dependencies[] = beautytips

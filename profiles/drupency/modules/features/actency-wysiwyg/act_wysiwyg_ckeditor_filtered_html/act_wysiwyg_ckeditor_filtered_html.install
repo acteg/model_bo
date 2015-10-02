@@ -1,0 +1,24 @@
+<?php
+/**
+ * Implements hook_libraries_info().
+ *
+ * For defining external libraries.
+ */
+
+function act_wysiwyg_ckeditor_filtered_html_libraries_info() {
+
+  $libraries['simple'] = array(
+    'name' => 'Simple library',
+    'vendor url' => 'http://example.com/simple',
+    'download url' => 'http://example.com/simple',
+    'version arguments' => array(
+      'file' => 'simple.js', // Could be any file with version info
+      'pattern' => '/Version (\d+)/',
+      'lines' => 5,
+    ),
+    'files' => array(
+      'js' => array('simple.js'), //this can be a path to the file location like array('lib/simple.js')
+    ),
+  );
+  return $libraries;
+}

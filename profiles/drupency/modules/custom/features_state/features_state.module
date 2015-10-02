@@ -1,0 +1,25 @@
+<?php
+
+/**
+ * Implements hook_menu().
+ */
+function features_state_menu() {
+  $items['admin/structure/features/features-state-settings'] = array(
+    'title' => 'Features State settings',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('features_state_admin_settings'),
+    'type' => MENU_NORMAL_ITEM,
+    'access callback' => 'user_access',
+    'access arguments' => array('administer features'),
+    'file' => 'features_state.admin.inc',
+  );
+  $items['admin/structure/features/features-state'] = array(
+    'title' => 'Features State',
+    'page callback' => 'features_state_list',
+    'file' => 'includes/features_state.inc',
+    'access callback' => 'user_access',
+    'access arguments' => array('manage features'),
+    'type' => MENU_CALLBACK,
+  );
+  return $items;
+}

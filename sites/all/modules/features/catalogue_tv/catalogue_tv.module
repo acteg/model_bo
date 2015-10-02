@@ -1,0 +1,7 @@
+<?php
+/**
+ * @file
+ * Code for the Catalogue TV feature.
+ */
+
+include_once 'catalogue_tv.features.inc';

@@ -1,0 +1,46 @@
+<?php
+/**
+ * @file
+ * Installation process for kaltura CCK field module.
+ */
+
+/**
+ * Implements hook_field_schema().
+ */
+function field_kaltura_field_schema($field) {
+  $columns = array(
+    'entryid' => array(
+      'description' => 'Kaltura entry id',
+      'type' => 'varchar',
+      'length' => 20,
+      'default' => '',
+      'not null' => TRUE,
+    ),
+    'mediatype' => array(
+      'type' => 'int',
+      'size' => 'tiny',
+    ),
+  );
+
+  $foreign_keys = array(
+    'entryid' => array(
+      'table' => 'node_kaltura',
+      'columns' => array('entryid' => 'kaltura_entryid'),
+    ),
+  );
+
+  return array(
+    'columns' => $columns,
+    'foreign keys' => $foreign_keys,
+  );
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function field_kaltura_uninstall() {
+  variable_del('kaltura_video_entry_height');
+  variable_del('kaltura_video_entry_thumb_height');
+  variable_del('kaltura_video_entry_thumb_width');
+  variable_del('kaltura_video_entry_width');
+}
