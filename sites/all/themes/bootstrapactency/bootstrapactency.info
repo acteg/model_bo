@@ -1,0 +1,21 @@
+name = Bootstrap Actency theme
+description = Bootstrap modified theme
+core = 7.x
+base theme = bootstrap
+
+
+
+;;;;;;;;;;;;;;;;;;;;;
+;; Stylesheets
+;;;;;;;;;;;;;;;;;;;;;
+
+stylesheets[all][] = css/style.css
+
+
+
+;;;;;;;;;;;;;;;;;;;;;
+;; Scripts
+;;;;;;;;;;;;;;;;;;;;;
+
+scripts[] = 'js/script.js'
+

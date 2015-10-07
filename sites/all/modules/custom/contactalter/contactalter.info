@@ -1,0 +1,7 @@
+name = Contact Alter
+description = Add Name field to contact form
+core = 7.x
+package = Actency
+php = 
+version = 0.1
+dependencies[] = contact

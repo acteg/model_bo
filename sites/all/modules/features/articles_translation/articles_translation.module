@@ -1,0 +1,7 @@
+<?php
+/**
+ * @file
+ * Code for the Articles Translation feature.
+ */
+
+include_once 'articles_translation.features.inc';
